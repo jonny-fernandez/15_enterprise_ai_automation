@@ -1,0 +1,6 @@
+# CP2 only: real local Spark/Parquet and deterministic warehouse.
+# Pin broad major versions; record actual installed versions with validation.
+-r requirements-cp1.txt
+pyspark>=3.5.3,<4.1
+pyarrow>=17,<23
+pandas>=2.2,<3.1

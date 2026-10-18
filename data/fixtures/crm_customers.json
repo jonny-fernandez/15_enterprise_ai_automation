@@ -1,0 +1,5 @@
+[
+  {"customer_id":"C-001","customer_name":"Synthetic Customer A","updated_at_utc":"2026-10-15T08:30:00Z"},
+  {"customer_id":"C-002","customer_name":"Synthetic Customer B","updated_at_utc":"2026-10-15T09:30:00Z"},
+  {"customer_id":"C-003","customer_name":"Synthetic Customer C","updated_at_utc":"2026-10-15T11:30:00Z"}
+]

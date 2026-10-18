@@ -1,0 +1,64 @@
+name: Project 15 Offline Validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ubuntu-full-spark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install local test dependencies
+        run: python -m pip install -r requirements-cp2.txt
+      - name: Read-only code audit
+        env:
+          PYTHONPATH: src
+        run: python scripts/audit_cp4.py --root . --output artifacts/ci_audit_ubuntu.json
+      - name: Full suite including actual Spark (no skips allowed)
+        env:
+          PYTHONPATH: src
+          SPARK_LOCAL_IP: 127.0.0.1
+        run: |
+          python -m pytest -q -rs --junitxml=pytest_ubuntu.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          s=ET.parse('pytest_ubuntu.xml').getroot().find('testsuite')
+          assert s is not None
+          assert int(s.get('failures','0'))+int(s.get('errors','0'))==0
+          assert int(s.get('skipped','0'))==0
+          assert int(s.get('tests','0'))>=139
+          print('Ubuntu full Spark gate passed')
+          PY
+
+  windows-policy-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python dependencies without Hadoop binaries
+        run: python -m pip install -r requirements-cp2.txt
+      - name: Read-only code audit
+        env:
+          PYTHONPATH: src
+        run: python scripts/audit_cp4.py --root . --output artifacts/ci_audit_windows.json
+      - name: Windows policy/unit tests (one native Spark test explicitly deselected)
+        shell: pwsh
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m pytest -q -rs -k 'not test_real_spark_parquet_partition_and_readback' --junitxml=pytest_windows.xml
+          if ($LASTEXITCODE -ne 0) { throw 'Windows unit tests failed' }
+          $suite = ([xml](Get-Content pytest_windows.xml -Raw)).testsuites.testsuite
+          if (([int]$suite.failures + [int]$suite.errors) -ne 0 -or [int]$suite.skipped -ne 0 -or [int]$suite.tests -lt 138) { throw 'Windows CI gate incomplete' }
+          Write-Host 'Windows policy suite passed. Real native Hadoop Spark test excluded here; required on user Windows.'

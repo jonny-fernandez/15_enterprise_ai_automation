@@ -1,0 +1,3 @@
+ticket_id,customer_id,priority,updated_at_utc
+T-100,C-001,high,2026-10-15T08:45:00Z
+T-101,C-003,normal,2026-10-15T12:45:00Z
