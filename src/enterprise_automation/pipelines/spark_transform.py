@@ -10,7 +10,8 @@ def build_transform(spark, input_path: str):
     return spark.read.parquet(input_path)
 
 
-def write_enriched_parquet(spark, records: list[dict], output_path: str) -> int:
+def write_enriched_parquet(spark, records: list[dict], output_path: str,
+                           *, single_file: bool = True) -> int:
     """Write typed, partitioned Parquet using an actual Spark DataFrame.
 
     An empty incremental batch still creates the declared schema and _SUCCESS.
@@ -36,7 +37,12 @@ def write_enriched_parquet(spark, records: list[dict], output_path: str) -> int:
         raise ValueError("Amount cannot be represented as Decimal(18,2)")
     if frame.filter(~F.col("reconciliation_status").isin("matched", "unmatched_customer")).limit(1).count():
         raise ValueError("Unrecognized reconciliation status")
-    writer = frame.coalesce(1).write.mode("errorifexists")
+    if type(single_file) is not bool:
+        raise ValueError("single_file must be bool")
+    # Opt-in distributed file layout. This does not remove the existing driver
+    # input/collect limitation; see CP2 upgrade runbook.
+    target = frame.coalesce(1) if single_file else frame.repartition("event_date")
+    writer = target.write.mode("errorifexists")
     if records:
         writer.partitionBy("event_date").parquet(output_path)
     else:

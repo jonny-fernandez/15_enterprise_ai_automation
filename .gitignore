@@ -34,3 +34,10 @@ hadoop-*/
 *.egg-info/
 .env.*
 !.env.example
+
+
+# Local checkpoint tooling and downloaded audit evidence - do not publish.
+/CP1_Baseline/
+/CP2_Upgrade/
+/CP3_Recovery/
+/CP4_Release/

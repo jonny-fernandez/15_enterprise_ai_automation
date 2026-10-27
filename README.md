@@ -94,3 +94,8 @@ See [`docs/CP4_RELEASE_GATES.md`](docs/CP4_RELEASE_GATES.md), [`docs/CP4_AZURE_B
 ## License and cloud boundary
 
 MIT-licensed (see [`LICENSE`](LICENSE)). Azure is **architecture documentation only**, by explicit project decision: no cloud account, resource deployment, paid AI service, enterprise OAuth, or real business-system connection is demonstrated. Full release steps and timed screenshot instructions are in [`docs/CP4_PUBLICATION_RUNBOOK.md`](docs/CP4_PUBLICATION_RUNBOOK.md).
+
+
+## October 2026 upgrades: schema evolution and recovery (publication pending)
+
+The expanded synthetic-only platform has completed local CP2/CP3 verification: 215/215 Windows tests passed with the real Spark test using an opt-in `local[1]` override, plus two read-only committed-run integrity checks. CP2 adds contract compatibility and dependent-order refresh; CP3 adds read-only recovery, integrity and quality verification. The 2,000-order seeded benchmark measures Python planning rather than distributed Spark throughput. Upgraded GitHub Actions results are pending. See [2026 upgrade release review](docs/CP4_UPGRADE_RELEASE_2026.md) for test scope, limitations and evidence labeling.

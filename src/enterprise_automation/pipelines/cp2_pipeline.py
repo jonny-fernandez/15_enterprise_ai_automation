@@ -16,6 +16,7 @@ from enterprise_automation.contracts import CONTRACTS, validate_record
 from enterprise_automation.pipelines.ingestion import canonical_json, sha256_text
 from enterprise_automation.pipelines.incremental_load import parse_timestamp
 from enterprise_automation.warehouse.sqlite import SQLiteWarehouse
+from enterprise_automation.pipelines.cp2_upgrade import dependent_order_ids
 
 SAFE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MODES = {"scheduled", "event", "api", "manual"}
@@ -155,7 +156,8 @@ def _incremental(records: dict[str, list[dict]], existing_versions, marks, mode,
 def execute_cp2(*, root: Path, source_run_id: str, run_id: str,
                 trigger_mode: str = "manual", trigger_id: str | None = None,
                 load_mode: str = "incremental", lookback_days: int = 1,
-                spark=None) -> dict:
+                spark=None, refresh_related_orders: bool = False,
+                spark_output_mode: str = "single") -> dict:
     """Run synthetic transformations with per-run replay protection.
 
     Spark session supplied by caller. This function doesn't auto-install Java
@@ -170,11 +172,21 @@ def execute_cp2(*, root: Path, source_run_id: str, run_id: str,
     trigger_id = _safe_id(trigger_id or run_id, "trigger_id")
     if type(lookback_days) is not int or not 0 <= lookback_days <= 30:
         raise ValueError("lookback_days must be integer in 0..30")
+    if type(refresh_related_orders) is not bool:
+        raise ValueError("refresh_related_orders must be bool")
+    if spark_output_mode not in {"single", "partitioned"}:
+        raise ValueError("Unsupported Spark output mode")
     root = Path(root).resolve()
     _, records, input_hash = _read_cp1(root, source_run_id)
-    signature = sha256_text(canonical_json({"source_run_id": source_run_id, "input_hash": input_hash,
+    # Preserve the exact legacy signature unless an opt-in capability is used.
+    signature_payload = {"source_run_id": source_run_id, "input_hash": input_hash,
             "mode": trigger_mode, "trigger_id": trigger_id, "load_mode": load_mode,
-            "lookback_days": lookback_days}))
+            "lookback_days": lookback_days}
+    if refresh_related_orders:
+        signature_payload["refresh_related_orders"] = True
+    if spark_output_mode != "single":
+        signature_payload["spark_output_mode"] = spark_output_mode
+    signature = sha256_text(canonical_json(signature_payload))
     warehouse = SQLiteWarehouse(root / "artifacts" / "cp2_local_warehouse.sqlite")
     out_dir = root / "data" / "processed" / run_id
     try:
@@ -222,6 +234,9 @@ def execute_cp2(*, root: Path, source_run_id: str, run_id: str,
                                                    load_mode, lookback_days)
         full_enriched, quality = _enrich(records)
         current_keys = {r["record_id"] for r in selected["ERP"]}
+        dependent_keys = (dependent_order_ids(records, selected)
+                          if refresh_related_orders and load_mode == "incremental" else [])
+        current_keys.update(dependent_keys)
         enriched = [r for r in full_enriched if r["order_id"] in current_keys]
         if spark is None:
             raise RuntimeError("CP2 Spark session required; no silent alternate engine")
@@ -238,7 +253,11 @@ def execute_cp2(*, root: Path, source_run_id: str, run_id: str,
         out_dir.mkdir(parents=True, exist_ok=False)
         parquet = out_dir / "parquet"
         try:
-            written = write_enriched_parquet(spark, enriched, str(parquet))
+            if spark_output_mode == "single":
+                written = write_enriched_parquet(spark, enriched, str(parquet))
+            else:
+                written = write_enriched_parquet(spark, enriched, str(parquet),
+                                                single_file=False)
             if written != len(enriched):
                 raise ValueError("Spark write count does not reconcile")
             verify_count = spark.read.parquet(str(parquet)).count()
@@ -267,6 +286,14 @@ def execute_cp2(*, root: Path, source_run_id: str, run_id: str,
                     "CRM/ticket updates do not automatically rebuild unchanged ERP orders",
                     "single-process SQLite does not provide distributed worker locking"],
             }
+            if refresh_related_orders or spark_output_mode != "single":
+                summary["upgrade_options"] = {
+                    "refresh_related_orders": refresh_related_orders,
+                    "spark_output_mode": spark_output_mode,
+                    "dependent_refresh_orders": len(dependent_keys),
+                    "limitations": ["source snapshot is still loaded in Python memory",
+                                    "Spark reference comparison still collects results",
+                                    "ticket deletion/reassignment requires a full refresh"]}
             (out_dir / "cp2_manifest.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n",
                                                       encoding="utf-8")
             warehouse.commit_run(run_id=run_id, signature=signature, source_run_id=source_run_id,
